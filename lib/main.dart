@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'provider.dart';
 
 void main() {
-  runApp(const TodoApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (context) => TaskProvider(),
+      child: const TodoApp(),
+    ),
+  );
 }
 
 class TodoApp extends StatelessWidget {
@@ -11,159 +17,137 @@ class TodoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Simple Todo App',
-      theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
+      title: 'Todo App',
+      theme: ThemeData(
+        primarySwatch: Colors.teal,
+        useMaterial3: true,
+        brightness: Brightness.dark,
+      ),
       home: const HomeScreen(),
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
-class Task {
-  String title;
-  bool isDone;
-
-  Task({required this.title, this.isDone = false});
-}
-
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  final List<Task> _tasks = [];
-  final TextEditingController _textFieldController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _loadTasks();
-  }
-
-  Future<void> _loadTasks() async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> taskStrings = prefs.getStringList('tasks') ?? [];
-    setState(() {
-      _tasks.clear();
-      for (String taskString in taskStrings) {
-        final parts = taskString.split(':');
-        final isDone = parts[0] == '1';
-        final title = parts.sublist(1).join(':');
-        _tasks.add(Task(title: title, isDone: isDone));
-      }
-    });
-  }
-
-  Future<void> _saveTasks() async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> taskStrings = [];
-    for (Task task in _tasks) {
-      taskStrings.add('${task.isDone ? '1' : '0'}:${task.title}');
-    }
-    await prefs.setStringList('tasks', taskStrings);
-  }
-
-  void _toggleTask(Task task) {
-    setState(() {
-      task.isDone = !task.isDone;
-    });
-    _saveTasks();
-  }
-
-  void _deleteTask(Task task) {
-    setState(() {
-      _tasks.remove(task);
-    });
-    _saveTasks();
-  }
-
-  void _addTask(String title) {
-    if (title.isNotEmpty) {
-      setState(() {
-        _tasks.add(Task(title: title));
-      });
-      _textFieldController.clear();
-      Navigator.of(context).pop();
-      _saveTasks();
-    }
-  }
-
-  Future<void> _displayAddTaskDialog() async {
-    return showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Tambah Tugas Baru'),
-          content: TextField(
-            controller: _textFieldController,
-            decoration: const InputDecoration(
-              hintText: 'Ketik tugas di sini...',
-            ),
-            autofocus: true,
-            onSubmitted: (value) => _addTask(value),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Batal'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-            ElevatedButton(
-              child: const Text('Tambah'),
-              onPressed: () {
-                _addTask(_textFieldController.text);
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final taskProvider = context.watch<TaskProvider>();
+    final tasks = taskProvider.tasks;
+
+    final TextEditingController textFieldController = TextEditingController();
+
+    void addTask() {
+      if (textFieldController.text.length >= 3) {
+        context.read<TaskProvider>().addTask(textFieldController.text);
+        Navigator.of(context).pop();
+      }
+    }
+
+    void showAddTaskDialog() {
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Tugas Baru'),
+            content: TextField(
+              controller: textFieldController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Judul Tugas (min. 3 karakter)',
+              ),
+              onSubmitted: (_) => addTask(),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton(onPressed: addTask, child: const Text('Tambah')),
+            ],
+          );
+        },
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('To-Do List 📝'),
-        backgroundColor: Colors.blue.shade100,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('To-Do Mini'),
+            // Jumlah tugas aktif
+            Text(
+              '${taskProvider.activeTaskCount} tugas belum selesai',
+              style: const TextStyle(fontSize: 14.0, color: Colors.white70),
+            ),
+          ],
+        ),
+        actions: [
+          // Tombol filter
+          PopupMenuButton<FilterType>(
+            onSelected: (filter) {
+              context.read<TaskProvider>().setFilter(filter);
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: FilterType.all, child: Text('Semua')),
+              const PopupMenuItem(
+                value: FilterType.active,
+                child: Text('Aktif'),
+              ),
+              const PopupMenuItem(
+                value: FilterType.done,
+                child: Text('Selesai'),
+              ),
+            ],
+            icon: const Icon(Icons.filter_list),
+          ),
+        ],
       ),
       body: ListView.builder(
-        itemCount: _tasks.length,
+        itemCount: tasks.length,
         itemBuilder: (context, index) {
-          final task = _tasks[index];
+          final task = tasks[index];
           return ListTile(
             leading: Checkbox(
               value: task.isDone,
-              onChanged: (bool? value) {
-                _toggleTask(task);
+              onChanged: (_) {
+                context.read<TaskProvider>().toggleTask(task);
               },
             ),
             title: Text(
               task.title,
               style: TextStyle(
-                decoration: task.isDone
-                    ? TextDecoration.lineThrough
-                    : TextDecoration.none,
-                color: task.isDone ? Colors.grey : Colors.black,
+                decoration: task.isDone ? TextDecoration.lineThrough : null,
+                color: task.isDone ? Colors.grey : null,
               ),
             ),
             trailing: IconButton(
-              icon: const Icon(Icons.delete_outline),
+              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
               onPressed: () {
-                _deleteTask(task);
+                context.read<TaskProvider>().deleteTask(task);
+
+                // Snackbar + tombol undo
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('Tugas dihapus'),
+                    action: SnackBarAction(
+                      label: 'UNDO',
+                      onPressed: () {
+                        context.read<TaskProvider>().undoDelete();
+                      },
+                    ),
+                  ),
+                );
               },
-              tooltip: 'Hapus Tugas',
             ),
           );
         },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _displayAddTaskDialog,
-        tooltip: 'Tambah Tugas',
+        onPressed: showAddTaskDialog,
         child: const Icon(Icons.add),
       ),
     );
